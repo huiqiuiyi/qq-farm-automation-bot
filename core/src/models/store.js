@@ -15,6 +15,9 @@ const PUSHOO_CHANNELS = new Set([
     'pushdeer', 'igot', 'telegram', 'feishu', 'ifttt', 'wecombot',
     'discord', 'wxpusher',
 ]);
+
+const DEFAULT_FERTILIZER_LAND_TYPES = ['gold', 'black', 'red', 'normal'];
+const FERTILIZER_LAND_TYPE_SET = new Set(DEFAULT_FERTILIZER_LAND_TYPES);
 const DEFAULT_OFFLINE_REMINDER = {
     channel: 'webhook',
     reloginUrlMode: 'none',
@@ -45,8 +48,10 @@ const DEFAULT_ACCOUNT_CONFIG = {
         // open_server_gift: true,
         fertilizer_gift: false,
         fertilizer_buy: false,
-        sell: true,
+        sell: false,
         fertilizer: 'smart',
+        fertilizer_multi_season: true,
+        fertilizer_land_types: [...DEFAULT_FERTILIZER_LAND_TYPES],
         skip_own_weed_bug: true,  // 不除自己草虫
     },
     plantingStrategy: 'max_exp',
@@ -92,7 +97,8 @@ const ALLOWED_AUTOMATION_KEYS = new Set(Object.keys(DEFAULT_ACCOUNT_CONFIG.autom
 
 let accountFallbackConfig = {
     ...DEFAULT_ACCOUNT_CONFIG,
-    automation: { ...DEFAULT_ACCOUNT_CONFIG.automation },
+    // automation: { ...DEFAULT_ACCOUNT_CONFIG.automation },
+    automation: { ...DEFAULT_ACCOUNT_CONFIG.automation, fertilizer_land_types: [...DEFAULT_FERTILIZER_LAND_TYPES] },
     intervals: { ...DEFAULT_ACCOUNT_CONFIG.intervals },
     friendQuietHours: { ...DEFAULT_ACCOUNT_CONFIG.friendQuietHours },
 };
@@ -161,6 +167,17 @@ function normalizeOfflineReminder(input) {
         offlineDeleteSec,
     };
 }
+function normalizeFertilizerLandTypes(input, fallback = DEFAULT_FERTILIZER_LAND_TYPES) {
+    const source = Array.isArray(input) ? input : fallback;
+    const normalized = [];
+    for (const item of source) {
+        const value = String(item || '').trim().toLowerCase();
+        if (!FERTILIZER_LAND_TYPE_SET.has(value)) continue;
+        if (normalized.includes(value)) continue;
+        normalized.push(value);
+    }
+    return normalized;
+}
 
 function cloneAccountConfig(base = DEFAULT_ACCOUNT_CONFIG) {
     const srcAutomation = (base && base.automation && typeof base.automation === 'object')
@@ -168,6 +185,10 @@ function cloneAccountConfig(base = DEFAULT_ACCOUNT_CONFIG) {
         : {};
     const automation = { ...DEFAULT_ACCOUNT_CONFIG.automation };
     for (const key of Object.keys(automation)) {
+        if (key === 'fertilizer_land_types') {
+            automation[key] = normalizeFertilizerLandTypes(srcAutomation[key], DEFAULT_FERTILIZER_LAND_TYPES);
+            continue;
+        }
         if (srcAutomation[key] !== undefined) automation[key] = srcAutomation[key];
     }
 
@@ -210,6 +231,8 @@ function normalizeAccountConfig(input, fallback = accountFallbackConfig) {
             if (k === 'fertilizer') {
                 const allowed = ['both', 'normal', 'organic', 'smart', 'none'];
                 cfg.automation[k] = allowed.includes(v) ? v : cfg.automation[k];
+            } else if (k === 'fertilizer_land_types') {
+                cfg.automation[k] = normalizeFertilizerLandTypes(v, cfg.automation[k]);
             } else {
                 cfg.automation[k] = !!v;
             }
@@ -451,7 +474,10 @@ function setAdminPasswordHash(hash) {
 loadGlobalConfig();
 
 function getAutomation(accountId) {
-    return { ...getAccountConfigSnapshot(accountId).automation };
+    // return { ...getAccountConfigSnapshot(accountId).automation };
+    const automation = { ...getAccountConfigSnapshot(accountId).automation };
+    automation.fertilizer_land_types = normalizeFertilizerLandTypes(automation.fertilizer_land_types);
+    return automation;
 }
 
 function getConfigSnapshot(accountId) {
@@ -487,6 +513,8 @@ function applyConfigSnapshot(snapshot, options = {}) {
             if (k === 'fertilizer') {
                 const allowed = ['both', 'normal', 'organic', 'smart', 'none'];
                 next.automation[k] = allowed.includes(v) ? v : next.automation[k];
+            } else if (k === 'fertilizer_land_types') {
+                next.automation[k] = normalizeFertilizerLandTypes(v, next.automation[k]);
             } else {
                 next.automation[k] = !!v;
             }

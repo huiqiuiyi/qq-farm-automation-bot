@@ -199,29 +199,135 @@ function getFastMatureLands(lands) {
     return targets;
 }
 // async function runFertilizerByConfig(plantedLands = []) {
+// async function runFertilizerByConfig(plantedLands = [], options = {}) {
+//     const fertilizerConfig = getAutomation().fertilizer || 'both';
+//     const planted = (Array.isArray(plantedLands) ? plantedLands : []).filter(Boolean);
+const ALL_FERTILIZER_LAND_TYPES = ['gold', 'black', 'red', 'normal'];
+const FERTILIZER_LAND_TYPE_LABELS = {
+    gold: '金土地',
+    black: '黑土地',
+    red: '红土地',
+    normal: '普通土地',
+};
+
+function getLandTypeByLevel(level) {
+    const lv = toNum(level);
+    if (lv >= 4) return 'gold';
+    if (lv === 3) return 'black';
+    if (lv === 2) return 'red';
+    return 'normal';
+}
+
+function normalizeFertilizerLandTypes(input) {
+    const source = Array.isArray(input) ? input : ALL_FERTILIZER_LAND_TYPES;
+    const result = [];
+    for (const item of source) {
+        const value = String(item || '').trim().toLowerCase();
+        if (!ALL_FERTILIZER_LAND_TYPES.includes(value)) continue;
+        if (result.includes(value)) continue;
+        result.push(value);
+    }
+    return result;
+}
+
+function filterLandIdsByTypes(landIds, landTypeById, selectedTypes) {
+    const ids = Array.isArray(landIds) ? landIds : [];
+    const selected = new Set(normalizeFertilizerLandTypes(selectedTypes));
+    if (selected.size === 0) return [];
+    if (selected.size === ALL_FERTILIZER_LAND_TYPES.length) return [...ids];
+
+    const filtered = [];
+    for (const id of ids) {
+        const type = String(landTypeById.get(id) || '');
+        if (!type) continue;
+        if (selected.has(type)) filtered.push(id);
+    }
+    return filtered;
+}
+
+function formatFertilizerLandTypes(types) {
+    return normalizeFertilizerLandTypes(types).map(type => FERTILIZER_LAND_TYPE_LABELS[type] || type);
+}
+
 async function runFertilizerByConfig(plantedLands = [], options = {}) {
-    const fertilizerConfig = getAutomation().fertilizer || 'both';
-    const planted = (Array.isArray(plantedLands) ? plantedLands : []).filter(Boolean);
+    const automation = getAutomation() || {};
+    const fertilizerConfig = automation.fertilizer || 'none';
+    const reason = String(options.reason || '').trim().toLowerCase() === 'multi_season' ? 'multi_season' : 'normal';
+    const reasonLabel = reason === 'multi_season' ? '多季补肥' : '常规施肥';
+    const eventName = reason === 'multi_season' ? 'fertilize_multi_season' : 'fertilize';
+    const selectedLandTypes = normalizeFertilizerLandTypes(automation.fertilizer_land_types);
+    const selectedLandTypeNames = formatFertilizerLandTypes(selectedLandTypes);
+    const planted = [...new Set((Array.isArray(plantedLands) ? plantedLands : []).map(v => toNum(v)).filter(Boolean))];
+
+    if (selectedLandTypes.length === 0) {
+        log('施肥', `${reasonLabel}：未勾选施肥范围，跳过本轮施肥`, {
+            module: 'farm',
+            event: eventName,
+            result: 'skip',
+            reason,
+            scope: 'none',
+        });
+        return { normal: 0, organic: 0 };
+    }
+
     const { skipNormal = false } = options;
 
     // if (planted.length === 0 && fertilizerConfig !== 'organic' && fertilizerConfig !== 'both') {
     if (planted.length === 0 && fertilizerConfig !== 'organic' && fertilizerConfig !== 'both' && fertilizerConfig !== 'smart') {
         return { normal: 0, organic: 0 };
     }
+    let latestLands = [];
+    const landTypeById = new Map();
+    try {
+        const latest = await getAllLands();
+        latestLands = Array.isArray(latest && latest.lands) ? latest.lands : [];
+        for (const land of latestLands) {
+            if (!land) continue;
+            const landId = toNum(land.id);
+            if (!landId) continue;
+            landTypeById.set(landId, getLandTypeByLevel(land.level));
+        }
+    } catch (e) {
+        logWarn('施肥', `${reasonLabel}：获取土地信息失败，按已知地块继续: ${e.message}`, {
+            module: 'farm',
+            event: eventName,
+            result: 'error',
+            reason,
+        });
+    }
+
+    const isAllLandTypesSelected = selectedLandTypes.length === ALL_FERTILIZER_LAND_TYPES.length;
+    if (landTypeById.size === 0 && !isAllLandTypesSelected) {
+        logWarn('施肥', `${reasonLabel}：无法确认土地类型，已跳过本轮施肥`, {
+            module: 'farm',
+            event: eventName,
+            result: 'skip',
+            reason,
+            landTypes: selectedLandTypes,
+        });
+        return { normal: 0, organic: 0 };
+    }
+
+    let normalTargets = planted;
+    if (landTypeById.size > 0) {
+        normalTargets = filterLandIdsByTypes(planted, landTypeById, selectedLandTypes);
+    }
 
     let fertilizedNormal = 0;
     let fertilizedOrganic = 0;
 
     // if ((fertilizerConfig === 'normal' || fertilizerConfig === 'both') && planted.length > 0) {
-    if (!skipNormal && (fertilizerConfig === 'normal' || fertilizerConfig === 'both' || fertilizerConfig === 'smart') && planted.length > 0) {
-        fertilizedNormal = await fertilize(planted, NORMAL_FERTILIZER_ID);
+    if (!skipNormal && (fertilizerConfig === 'normal' || fertilizerConfig === 'both' || fertilizerConfig === 'smart') && normalTargets.length > 0) {
+        fertilizedNormal = await fertilize(normalTargets, NORMAL_FERTILIZER_ID);
         if (fertilizedNormal > 0) {
-            log('施肥', `已为 ${fertilizedNormal}/${planted.length} 块地施无机化肥`, {
+            log('施肥', `${reasonLabel}：已为 ${fertilizedNormal}/${normalTargets.length} 块地施普通化肥（范围: ${selectedLandTypeNames.join('、')}）`, {
             module: 'farm',
-            event: '施肥',
+            event: eventName,
             result: 'ok',
+            reason,
             type: 'normal',
             count: fertilizedNormal,
+            landTypes: selectedLandTypes,
         });
             recordOperation('fertilize', fertilizedNormal);
         }
@@ -229,21 +335,29 @@ async function runFertilizerByConfig(plantedLands = [], options = {}) {
 
     if (fertilizerConfig === 'organic' || fertilizerConfig === 'both') {
         let organicTargets = planted;
-        try {
-            const latest = await getAllLands();
-            organicTargets = getOrganicFertilizerTargetsFromLands(latest && latest.lands);
-        } catch (e) {
-            logWarn('施肥', `获取全农场地块失败，回退已种地块: ${e.message}`);
+        // try {
+        //     const latest = await getAllLands();
+        //     organicTargets = getOrganicFertilizerTargetsFromLands(latest && latest.lands);
+        // } catch (e) {
+        //     logWarn('施肥', `获取全农场地块失败，回退已种地块: ${e.message}`);
+        // }
+        if (latestLands.length > 0) {
+            organicTargets = getOrganicFertilizerTargetsFromLands(latestLands);
         }
+        if (landTypeById.size > 0) {
+            organicTargets = filterLandIdsByTypes(organicTargets, landTypeById, selectedLandTypes);
+            }
 
         fertilizedOrganic = await fertilizeOrganicLoop(organicTargets);
         if (fertilizedOrganic > 0) {
-            log('施肥', `有机化肥循环施肥完成，共施 ${fertilizedOrganic} 次`, {
+            log('施肥', `${reasonLabel}：有机化肥循环施肥完成，共施 ${fertilizedOrganic} 次（范围: ${selectedLandTypeNames.join('、')}）`, {
                 module: 'farm',
-                event: '施肥',
+                event: eventName,
                 result: 'ok',
+                reason,
                 type: 'organic',
                 count: fertilizedOrganic,
+                landTypes: selectedLandTypes,
             });
             recordOperation('fertilize', fertilizedOrganic);
         }
@@ -537,6 +651,8 @@ async function getLandsDetail() {
                     landSize,
                     couldUnlock,
                     couldUpgrade,
+                    currentSeason: 0,
+                    totalSeason: 0,
                 });
                 continue;
             }
@@ -554,6 +670,8 @@ async function getLandsDetail() {
                     landSize,
                     couldUnlock,
                     couldUpgrade,
+                    currentSeason: 0,
+                    totalSeason: 0,
                 });
                 continue;
             }
@@ -571,6 +689,8 @@ async function getLandsDetail() {
                     landSize,
                     couldUnlock,
                     couldUpgrade,
+                    currentSeason: 0,
+                    totalSeason: 0,
                 });
                 continue;
             }
@@ -580,6 +700,9 @@ async function getLandsDetail() {
             const plantCfg = getPlantById(plantId);
             const seedId = toNum(plantCfg && plantCfg.seed_id);
             const seedImage = seedId > 0 ? getSeedImageBySeedId(seedId) : '';
+            const totalSeason = Math.max(1, toNum(plantCfg && plantCfg.seasons) || 1);
+            const currentSeasonRaw = toNum(plant.season);
+            const currentSeason = currentSeasonRaw > 0 ? Math.min(currentSeasonRaw, totalSeason) : 1;
             const phaseName = PHASE_NAMES[phaseVal] || '';
             const maturePhase = Array.isArray(plant.phases)
                 ? plant.phases.find((p) => p && toNum(p.phase) === PlantPhase.MATURE)
@@ -604,6 +727,8 @@ async function getLandsDetail() {
                 seedId,
                 seedImage,
                 phaseName,
+                currentSeason,
+                totalSeason,
                 matureInSec,
                 needWater,
                 needWeed,
@@ -1013,6 +1138,7 @@ async function runFarmOperation(opType) {
     // 执行收获
     let harvestedLandIds = [];
     let harvestReply = null;
+    let postHarvest = null;
     if (opType === 'all' || opType === 'harvest') {
         if (status.harvestable.length > 0) {
             try {
@@ -1048,7 +1174,8 @@ async function runFarmOperation(opType) {
         let allDeadLands = [...new Set(status.dead)];
 
         if (opType === 'all' && harvestedLandIds.length > 0) {
-            const postHarvest = await resolveRemovableHarvestedLands(harvestedLandIds, harvestReply);
+            //const postHarvest = await resolveRemovableHarvestedLands(harvestedLandIds, harvestReply);
+            postHarvest = await resolveRemovableHarvestedLands(harvestedLandIds, harvestReply);
             allDeadLands = [...new Set([...allDeadLands, ...postHarvest.removable])];
         }
         // 注意：如果是单纯点"一键种植"，harvestedLandIds 为空，只种当前的空地/死地
@@ -1059,6 +1186,27 @@ async function runFarmOperation(opType) {
                 actions.push(`种植${plantCount}`);
                 recordOperation('plant', plantCount);
             } catch (e) { logWarn('种植', e.message); }
+        }
+    }
+    if (opType === 'all' && postHarvest && Array.isArray(postHarvest.growing) && postHarvest.growing.length > 0 && isAutomationOn('fertilizer_multi_season')) {
+        const multiSeasonTargets = [...new Set(postHarvest.growing.map(v => toNum(v)).filter(Boolean))];
+        if (multiSeasonTargets.length > 0) {
+            log('施肥', `检测到多季作物进入后续季，准备执行多季补肥，目标地块 ${multiSeasonTargets.length} 块`, {
+                module: 'farm',
+                event: 'fertilize_multi_season',
+                result: 'trigger',
+                count: multiSeasonTargets.length,
+                landIds: multiSeasonTargets,
+            });
+            try {
+                await runFertilizerByConfig(multiSeasonTargets, { reason: 'multi_season' });
+            } catch (e) {
+                logWarn('施肥', `多季补肥执行失败: ${e.message}`, {
+                    module: 'farm',
+                    event: 'fertilize_multi_season',
+                    result: 'error',
+                });
+            }
         }
     }
 

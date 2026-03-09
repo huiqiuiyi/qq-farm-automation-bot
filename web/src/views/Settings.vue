@@ -50,6 +50,29 @@ const currentAccountName = computed(() => {
   return acc ? (acc.name || acc.nick || acc.id) : null
 })
 
+const allFertilizerLandTypes = ['gold', 'black', 'red', 'normal']
+
+const fertilizerLandTypeOptions = [
+  { label: '金土地', value: 'gold' },
+  { label: '黑土地', value: 'black' },
+  { label: '红土地', value: 'red' },
+  { label: '普通土地', value: 'normal' },
+]
+
+function normalizeFertilizerLandTypes(input: unknown) {
+  const source = Array.isArray(input) ? input : allFertilizerLandTypes
+  const normalized: string[] = []
+  for (const item of source) {
+    const value = String(item || '').trim().toLowerCase()
+    if (!allFertilizerLandTypes.includes(value))
+      continue
+    if (normalized.includes(value))
+      continue
+    normalized.push(value)
+  }
+  return normalized
+}
+
 const localSettings = ref({
   plantingStrategy: 'max_exp',
   preferredSeedId: 0,
@@ -73,6 +96,8 @@ const localSettings = ref({
     fertilizer_buy: false,
     fertilizer: 'normal',
     skip_own_weed_bug: false,
+    fertilizer_multi_season: false,
+    fertilizer_land_types: [...allFertilizerLandTypes],
   },
   fertilizerBuyType: 'inorganic',
   fertilizerBuyCount: 10,
@@ -125,6 +150,8 @@ function syncLocalSettings() {
         fertilizer_buy: false,
         fertilizer: 'none',
         skip_own_weed_bug: false,
+        fertilizer_multi_season: false,
+        fertilizer_land_types: [...allFertilizerLandTypes],
       }
     }
     else {
@@ -143,13 +170,15 @@ function syncLocalSettings() {
         fertilizer_buy: false,
         fertilizer: 'none',
         skip_own_weed_bug: false,
+        fertilizer_multi_season: false,
+        fertilizer_land_types: [...allFertilizerLandTypes],
       }
       localSettings.value.automation = {
         ...defaults,
         ...localSettings.value.automation,
       }
     }
-
+    localSettings.value.automation.fertilizer_land_types = normalizeFertilizerLandTypes(localSettings.value.automation.fertilizer_land_types)
     if (settings.value.offlineReminder) {
       localOffline.value = JSON.parse(JSON.stringify(settings.value.offlineReminder))
     }
@@ -613,13 +642,49 @@ async function handleTestOffline() {
             <BaseSwitch v-model="localSettings.automation.friend_help_exp_limit" label="经验满不帮忙" />
           </div>
 
-          <div>
-            <BaseSelect
-              v-model="localSettings.automation.fertilizer"
-              label="施肥策略"
-              class="w-full md:w-1/2"
-              :options="fertilizerOptions"
-            />
+<!--          <div>-->
+<!--            <BaseSelect-->
+<!--              v-model="localSettings.automation.fertilizer"-->
+<!--              label="施肥策略"-->
+<!--              class="w-full md:w-1/2"-->
+<!--              :options="fertilizerOptions"-->
+<!--            />-->
+          <div class="space-y-3">
+            <div class="rounded border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-800/60 dark:bg-amber-900/10">
+              <div class="mb-2 text-sm text-amber-800 font-medium dark:text-amber-300">
+                施肥范围
+              </div>
+              <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
+                <label
+                    v-for="option in fertilizerLandTypeOptions"
+                    :key="option.value"
+                    class="flex cursor-pointer items-center gap-1.5 rounded bg-white px-2 py-1 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                >
+                  <input
+                      v-model="localSettings.automation.fertilizer_land_types"
+                      :value="option.value"
+                      type="checkbox"
+                      class="h-3.5 w-3.5"
+                  >
+                  <span>{{ option.label }}</span>
+                </label>
+              </div>
+              <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                施肥前会优先按土地类型过滤，仅对命中范围的地块执行施肥策略。
+              </p>
+            </div>
+            <div class="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+              <BaseSelect
+                  v-model="localSettings.automation.fertilizer"
+                  label="施肥策略"
+                  class="w-full"
+                  :options="fertilizerOptions"
+              />
+              <BaseSwitch
+                  v-model="localSettings.automation.fertilizer_multi_season"
+                  label="多季补肥"
+              />
+            </div>
           </div>
         </div>
 

@@ -360,7 +360,8 @@ function stopUnifiedScheduler() {
 
 function applyRuntimeConfig(snapshot, syncNow = false) {
     const prevAuto = getAutomation();
-    applyConfigSnapshot(snapshot || {}, { persist: false });
+    const accountId = process.env.FARM_ACCOUNT_ID || '';
+    applyConfigSnapshot(snapshot || {}, { persist: false, accountId });
     const rev = Number((snapshot || {}).__revision || 0);
     if (rev > 0) appliedConfigRevision = rev;
 
