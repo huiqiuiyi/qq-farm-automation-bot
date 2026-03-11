@@ -82,6 +82,9 @@ const session = {
 let currentAccountId = null;
 let saveTimer = null;
 
+// 记录当前账号实际登录成功的时间
+let sessionStartTime = 0;
+
 function recordOperation(type, count = 1) {
     if (operations[type] !== undefined) {
         operations[type] += count;
@@ -120,6 +123,9 @@ function initStats(gold, exp, coupon = 0) {
     initialState.gold = g;
     initialState.exp = e;
     initialState.coupon = c;
+    
+    // 每次重新初始化时，重置会话计时起点
+    sessionStartTime = Date.now();
 }
 
 function initStatsWithPersistence(accountId, gold, exp, coupon = 0) {
@@ -189,6 +195,9 @@ function resetSessionGains() {
     session.lastGoldGain = 0;
     session.lastExpGain = 0;
     session.lastExpTime = 0;
+    
+    // 确保手动重置收益时，计时也能同步更新
+    sessionStartTime = Date.now();
 }
 
 function recomputeSessionTotals(currentGold, currentExp, currentCoupon) {
@@ -213,9 +222,19 @@ function getStats(statusData, userState, connected, limits) {
     const currentExp = Number.isFinite(Number(rawExp)) ? Number(rawExp) : 0;
     const currentCoupon = Number.isFinite(Number(rawCoupon)) ? Number(rawCoupon) : 0;
 
+    let currentUptime = 0;
+
     if (connected) {
         updateStats(currentGold, currentExp);
         recomputeSessionTotals(currentGold, currentExp, currentCoupon);
+        
+        // 只有在线时，才从真正的登录成功时刻计算挂机时长
+        if (sessionStartTime > 0) {
+            currentUptime = Math.floor((Date.now() - sessionStartTime) / 1000);
+        }
+    } else {
+        // 离线时重置计时起点
+        sessionStartTime = 0;
     }
 
     const operationsSnapshot = { ...operations };
@@ -229,7 +248,7 @@ function getStats(statusData, userState, connected, limits) {
             exp: currentExp,
             platform: statusObj.platform || userObj.platform || 'qq',
         },
-        uptime: process.uptime(),
+        uptime: currentUptime,
         operations: operationsSnapshot,
         sessionExpGained: session.expGained,
         sessionGoldGained: session.goldGained,
