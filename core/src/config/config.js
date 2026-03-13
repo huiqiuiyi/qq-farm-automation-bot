@@ -5,7 +5,7 @@ const process = require('node:process');
 
 const CONFIG = {
     serverUrl: 'wss://gate-obt.nqf.qq.com/prod/ws',
-    clientVersion: '1.7.0.5_20260306',
+    clientVersion: '1.7.0.6_20260313',
     platform: 'qq',              // 平台: qq 或 wx (可通过 --wx 切换为微信)
     os: 'iOS',
     heartbeatInterval: 25000,    // 心跳间隔 25秒
@@ -15,8 +15,8 @@ const CONFIG = {
     farmCheckIntervalMax: 5000,   // 新逻辑：农场巡查间隔最大值(ms)
     friendCheckIntervalMin: 12000,// 新逻辑：好友巡查间隔最小值(ms)
     friendCheckIntervalMax: 15000,// 新逻辑：好友巡查间隔最大值(ms)
-    adminPort: Number(process.env.ADMIN_PORT || 3007), // 管理面板 HTTP 端口
-    adminPassword: process.env.ADMIN_PASSWORD || 'admin',
+    adminPort: Number(process.env.ADMIN_PORT), // 管理面板 HTTP 端口
+    adminPassword: process.env.ADMIN_PASSWORD,
 };
 
 // 生长阶段枚举
